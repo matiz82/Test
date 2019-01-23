@@ -2,3 +2,5 @@ Initial Content for GIT testing
 Adding more content to the demo 
 
 I am learning how to commit
+
+I am adding some more content to test branches in git
