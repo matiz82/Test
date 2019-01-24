@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cloudformation template provisioning a SAP Application host"
+Parameters:
+  Subnet:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "A subnet where the instance should be created"
+    ConstraintDescription: "must be a list of at least one existing subnets associated with at least two different availability zones. They should be residing in the selected Virtual Private Cloud."
+  InstanceType:
+    Description: "Instance type used for SAP-Application hosts"
+    Type: String
+    Default: "r4.xlarge"
+    AllowedValues:
+      - "m5.large"
+      - "m5.xlarge"
+      - "m5.2xlarge"
+      - "m5.4xlarge"
+      - "m5.12xlarge"
+      - "m5.24xlarge"
+      - "c5.large"
+      - "c5.xlarge"
+      - "c5.2xlarge"
+      - "c5.4xlarge"
+      - "c5.8xlarge"
+      - "r4.large"
+      - "r4.xlarge"
+      - "r4.2xlarge"
+      - "r4.4xlarge"
+      - "r4.8xlarge"
+      - "r4.16xlarge"
+      - "x1e.xlarge"
+      - "x1e.2xlarge"
+      - "x1e.4xlarge"
+      - "x1e.8xlarge"
+      - "x1e.16xlarge"
+      - "x1e.32xlarge"
+      - "x1.16xlarge"
+      - "x1.32xlarge"
+    ConstraintDescription: "must be true valid EC2 instance type."
+  InstanceAMI:
+    Description: "The AMI IDs for launching new EC2 Instance for SAP Application ami-c90195b0"
+    Type: String
+    Default: ami-c90195b0
+    AllowedValues:
+      - "ami-c90195b0"
+  HostName:
+    Description: "The Name of the node to use as a DNS-name hostname"
+    Type: String
+  KeyName:
+    Description: "The EC2 Key Pair to allow SSH access to the instances"
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: "must be the name of an existing EC2 KeyPair."
+  SapHostSecurityGroupId:
+    Description: The security groupd id of the SAP Application-host
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  Environment:
+    Description: Environment tag on resources, allowed values production and staging
+    Type: String
+    AllowedValues:
+      - production
+      - staging
+  Service:
+    Description: Service tag on resources
+    Type: String
+    AllowedValues:
+      - sapafi-app
+      - saperp-app
+      - sapfiori-app
+  Team:
+    Default: fineng
+    Description: Team Tag on AWS
+    Type: String
+  SystemID:
+    Description: SystemID tag on resources
+    Type: String
+    AllowedValues:
+      - sap-ads
+      - sap-afi-hana
+      - sap-cs
+      - sap-fiori
+      - sap-hana-db
+      - sap-s4
+      - sap-s4-hana
+Mappings:
+  RegionToDns:
+    eu-west-1:
+      "production" : "production.eu1"
+      "staging" : "staging.eu1"
+    us-east-1:
+      "production" : "production.us1"
+      "staging" : "staging.us1"
+Resources:
+  SAPHost:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      IamInstanceProfile: teams-instance-profiles-fineng-InstanceProfile
+      AvailabilityZone: eu-west-1a
+      DisableApiTermination: false
+      EbsOptimized: true
+      ImageId: !Ref InstanceAMI
+      KeyName: !Ref KeyName
+      Monitoring: true
+      SecurityGroupIds: !Ref SapHostSecurityGroupId
+      SubnetId: !Ref Subnet
+      InstanceType: !Ref InstanceType
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          curl -O https://bootstrap.pypa.io/get-pip.py
+          python get-pip.py --user
+          export PATH=~/.local/bin:$PATH
+          pip install awscli --upgrade --user
+          aws s3 cp s3://eu-non-production-sap-klarna/fineng/CFT/saps4-r-a1.sh user-data.sh
+          chmod +x user-data.sh
+          ./user-data.sh
+      Tags:
+        - Key: Name
+          Value: !Ref HostName
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: SystemID
+          Value: !Ref SystemID
+  DataVolume1:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 30
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", "/usr/sap" ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment1:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdb'
+      InstanceId: !Ref SAPHost
+      VolumeId: !Ref DataVolume1
+  DataVolume2:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 12
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", "/sapmnt" ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment2:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdc'
+      InstanceId: !Ref SAPHost
+      VolumeId: !Ref DataVolume2
+  DataVolume3:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 10
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", "/usr/sap/data" ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment3:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdd'
+      InstanceId: !Ref SAPHost
+      VolumeId: !Ref DataVolume3
+  DataVolume4:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 10
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", "/usr/sap/trans" ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment4:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sde'
+      InstanceId: !Ref SAPHost
+      VolumeId: !Ref DataVolume4
+  DataVolume5:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 15
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", "SWAP" ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment5:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdf'
+      InstanceId: !Ref SAPHost
+      VolumeId: !Ref DataVolume5
+  SAPNodeDNSRecord:
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      HostedZoneName: !Join [ "", [ !FindInMap [RegionToDns, !Ref "AWS::Region", !Ref Environment], ".", "sap.klarna.net", "."]]
+      Name: !Join [ "", [ !Ref HostName, ".", !FindInMap [RegionToDns, !Ref "AWS::Region", !Ref Environment], ".", "sap.klarna.net", "."]]
+      Type: 'A'
+      TTL: 1800
+      ResourceRecords:
+        - !GetAtt SAPHost.PrivateIp
+Outputs:
+  PublicDnsName:
+    Description: "The DNS-name of the instance"
+    Value: !Join ["", [!Ref HostName, ".", !Ref Environment,".sap.klarna.net"] ]
+  PrivateDnsName:
+    Description: "The DNS-name of the instance"
+    Value: !GetAtt SAPHost.PrivateDnsName
+  PrivateIp:
+    Description: The private IP of the node
+    Value: !GetAtt SAPHost.PrivateIp
