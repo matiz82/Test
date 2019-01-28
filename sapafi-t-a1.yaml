@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cloudformation template provisioning a SAP HANA host"
+Parameters:
+  Subnet:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "A subnet where the instance should be created"
+    ConstraintDescription: "must be a list of at least one existing subnets associated with at least two different availability zones. They should be residing in the selected Virtual Private Cloud."
+  Environment:
+    Description: Select your SAP Envrionment type. It will be also used as environment tag for AWS resources.
+    Type: String
+    AllowedValues:
+      - Sandbox
+      - Development
+      - Quality
+      - Production
+  # InstanceType:
+  #   Description: "Instance type used for SAP-HANA-DB hosts"
+  #   Type: String
+  #   AllowedValues:
+  #     - "r4.xlarge"   # General Purpose (4 vCPUs, 30,5 GB)
+  #     - "r4.xlarge"  # General Purpose (4 vCPUs, 30,5 GB)
+  #     - "x1.2xlarge"  # General Purpose (8 vCPUs, 61 GB)
+  #     - "x1.2xlarge"  # General Purpose (8 vCPUs, 61 GB)
+    ConstraintDescription: "must be true valid EC2 instance type."
+  InstanceAMI:
+    Description: "The AMI IDs for launching new EC2 Instance for SAP Application"
+    Type: String
+    Default: ami-c90195b0 #Red Hat Enterprise Linux 7.4 for SAP Application
+  HostName:
+    Description: "The Name of the host to use as a DNS-name hostname"
+    Type: String
+  DataVolumeSize:
+    Type: Number
+    Description: "The size of the extra datavolume connected to the instance"
+  KeyName:
+    Description: "The EC2 Key Pair to allow SSH access to the instances"
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: "must be the name of an existing EC2 KeyPair."
+  SapHostSecurityGroupId:
+    Description: The security groupd id of the SAP Application-host
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  Account:
+    Description: Provide the AWS account where you want to provision your instance
+    Type: String
+    AllowedValues:
+      - klarnaprodsap     # AWS sap-prod account
+      - klarnanonprodsap  # AWS sap-nonprod account
+  Service:
+    Description: Service tag on resources
+    Type: String
+    AllowedValues:
+      - sapafi-app
+      - saperp-app
+      - sapfiori-app
+      - sapads-app
+      - sapcs-app
+  Team:
+    Default: fineng
+    Description: Team Tag on AWS
+    Type: String
+  SystemID:
+    Description: SystemID tag on resources
+    Type: String
+    AllowedValues:
+      - sapafi-app # SAP Application For AFI Systems
+      - saps4-app  # SAP Application For S4 ERP Systems
+      - sapfiori-app # SAP Application For S4 Fiori Systems
+      - sapads-app # SAP Application For S4 ADS Systems
+Mappings:
+  AccountToDns:
+    eu-west-1:
+      klarnaprodsap: "production.eu1"
+      klarnanonprodsap: "staging.eu1"
+    us-west-1:
+      klarnaprodsap : "production.us1"
+      klarnanonprodsap : "staging.us1"
+  InstanceTypeByEnvironment:
+    type:
+      Sandbox: "r4.xlarge"
+      Development: "r4.xlarge"
+      Quality: "r4.2xlarge"
+      Prduction: "r4.2xlarge"
+Resources:
+  SAPHostInstance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      IamInstanceProfile: teams-instance-profiles-fineng-InstanceProfile
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      DisableApiTermination: false
+      EbsOptimized: true
+      ImageId: !Ref InstanceAMI
+      KeyName: !Ref KeyName
+      Monitoring: true
+      SecurityGroupIds: !Ref SapHostSecurityGroupId
+      SubnetId: !Ref Subnet
+      InstanceType: !FindInMap [InstanceTypeByEnvironment, "type", !Ref Environment]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          #hostnamectl set-hostname sapafi-p-a1
+          #set -o errexit
+          #yum -y update aws-cfn-bootstrap
+          #/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource SAPHost --region ${AWS::Region}
+          #/opt/aws/bin/cfn-signal --exit-code $? --stack ${AWS::StackName} --resource SAPHost --region ${AWS::Region}
+          curl -O https://bootstrap.pypa.io/get-pip.py
+          python get-pip.py --user
+          export PATH=~/.local/bin:$PATH
+          pip install awscli --upgrade --user
+          aws s3 cp s3://eu-non-production-sap-klarna/fineng/CFT/sapafi-t-a1.sh user-data.sh
+          chmod +x user-data.sh
+          ./user-data.sh
+      Tags:
+        - Key: Name
+          Value: !Ref HostName
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: SystemID
+          Value: !Ref SystemID
+  DataVolume1:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: !Ref DataVolumeSize
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", !Ref Service ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment1:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdb'
+      InstanceId: !Ref SAPHostInstance
+      VolumeId: !Ref DataVolume1
+  DataVolume2:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: eu-west-1a
+      Encrypted: true
+      VolumeType: 'gp2'
+      Size: 15
+      Tags:
+        - Key: Name
+          Value: !Join ["", [ !Ref HostName, ":", !Ref Service ]]
+        - Key: Service
+          Value: !Ref Service
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+  DataVolumeAttachment2:
+    Type: "AWS::EC2::VolumeAttachment"
+    Properties:
+      Device: '/dev/sdc'
+      InstanceId: !Ref SAPHostInstance
+      VolumeId: !Ref DataVolume2
+  SAPNodeDNSRecord:
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      HostedZoneName: !Join [ "", [ !FindInMap [AccountToDns, !Ref "AWS::Region", !Ref Account], ".", "sap.klarna.net", "."]]
+      Name: !Join [ "", [ !Ref HostName, ".", !FindInMap [AccountToDns, !Ref "AWS::Region", !Ref Account], ".", "sap.klarna.net", "."]]
+      Type: 'A'
+      TTL: 900
+      ResourceRecords:
+        - !GetAtt SAPHostInstance.PrivateIp
+Outputs:
+  PublicDnsName:
+    Description: "The DNS-name of the instance"
+    Value: !Join ["", [!Ref SAPHostInstance, ".", !FindInMap [AccountToDns, !Ref "AWS::Region", !Ref Account],".sap.klarna.net"] ]
+  PrivateDnsName:
+    Description: "The DNS-name of the instance"
+    Value: !GetAtt SAPHostInstance.PrivateDnsName
+  PrivateIp:
+    Description: The private IP of the node
+    Value: !GetAtt SAPHostInstance.PrivateIp
